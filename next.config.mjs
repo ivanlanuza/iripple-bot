@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
   reactStrictMode: true,
+  serverExternalPackages: ["kokoro-js"],
+  experimental: {
+    preloadEntriesOnStart: false,
+  },
 };
 
 export default nextConfig;

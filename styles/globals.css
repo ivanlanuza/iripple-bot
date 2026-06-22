@@ -1,26 +1,70 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #dbeee4;
+  --foreground: #17342c;
+  --mint-50: #f3fff9;
+  --mint-100: #d8f7e8;
+  --mint-200: #b7ead6;
+  --obsidian: #17342c;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-mint-50: var(--mint-50);
+  --color-mint-100: var(--mint-100);
+  --color-mint-200: var(--mint-200);
+  --color-obsidian: var(--obsidian);
+  --font-display: "Avenir Next Condensed", "Arial Narrow", "Trebuchet MS", sans-serif;
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "Menlo", "Monaco", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+body {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(61, 131, 107, 0.2);
+  color: #17342c;
+}
+
+.scanlines {
+  background-image: linear-gradient(
+    to bottom,
+    rgba(24, 48, 42, 0.05) 0px,
+    rgba(24, 48, 42, 0.02) 1px,
+    transparent 3px,
+    transparent 7px
+  );
+  background-size: 100% 7px;
+}
+
+.kiosk-shell {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.45), transparent 40%),
+    linear-gradient(180deg, rgba(130, 185, 164, 0.92), rgba(101, 151, 133, 0.96));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24),
+    inset 0 -10px 50px rgba(33, 66, 56, 0.08),
+    0 32px 70px rgba(35, 71, 60, 0.18);
+}
+
+.debug-panel {
+  border: 1px solid rgba(68, 111, 96, 0.18);
+  background: rgba(240, 255, 248, 0.72);
+  border-radius: 1.5rem;
+  padding: 1rem;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 18px 40px rgba(35, 71, 60, 0.12);
+  backdrop-filter: blur(14px);
 }
