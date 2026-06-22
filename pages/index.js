@@ -1,5 +1,11 @@
 import Head from "next/head";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import RobotFace from "@/components/RobotFace";
 
@@ -9,8 +15,68 @@ const BASE_MOUTH_MOTION = {
   smile: 0.18,
   lift: -2,
 };
+const DEFAULT_FACE_STYLE = "pixelized";
+const DEFAULT_USE_FILLER_SPEECH = false;
 const FACE_STYLE_STORAGE_KEY = "iripple:face-style";
 const FILLER_SPEECH_STORAGE_KEY = "iripple:use-filler-speech";
+const PREFERENCES_EVENT = "iripple:preferences-changed";
+const DEFAULT_PREFERENCES_SNAPSHOT = `${DEFAULT_FACE_STYLE}|0`;
+
+function getStoredPreferencesSnapshot() {
+  if (typeof window === "undefined") {
+    return DEFAULT_PREFERENCES_SNAPSHOT;
+  }
+
+  const savedFaceStyle = window.localStorage.getItem(FACE_STYLE_STORAGE_KEY);
+  const faceStyle = savedFaceStyle === "rounded" ? "rounded" : DEFAULT_FACE_STYLE;
+  const useFillerSpeech =
+    window.localStorage.getItem(FILLER_SPEECH_STORAGE_KEY) === "1";
+
+  return `${faceStyle}|${useFillerSpeech ? "1" : "0"}`;
+}
+
+function subscribeToPreferences(callback) {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+
+  const handleStorage = (event) => {
+    if (
+      !event.key ||
+      event.key === FACE_STYLE_STORAGE_KEY ||
+      event.key === FILLER_SPEECH_STORAGE_KEY
+    ) {
+      callback();
+    }
+  };
+
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(PREFERENCES_EVENT, callback);
+
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(PREFERENCES_EVENT, callback);
+  };
+}
+
+function useStoredPreferences() {
+  const snapshot = useSyncExternalStore(
+    subscribeToPreferences,
+    getStoredPreferencesSnapshot,
+    () => DEFAULT_PREFERENCES_SNAPSHOT,
+  );
+
+  const [faceStyleToken, useFillerSpeechToken] = snapshot.split("|");
+  return {
+    faceStyle: faceStyleToken === "rounded" ? "rounded" : DEFAULT_FACE_STYLE,
+    useFillerSpeech: useFillerSpeechToken === "1",
+  };
+}
+
+function updateStoredPreference(key, value) {
+  window.localStorage.setItem(key, value);
+  window.dispatchEvent(new Event(PREFERENCES_EVENT));
+}
 
 export default function IrippleHome() {
   const [stage, setStage] = useState("idle");
@@ -19,21 +85,7 @@ export default function IrippleHome() {
   const [mood, setMood] = useState("HAPPY");
   const [error, setError] = useState("");
   const [debugMode, setDebugMode] = useState(false);
-  const [useFillerSpeech, setUseFillerSpeech] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return window.localStorage.getItem(FILLER_SPEECH_STORAGE_KEY) === "1";
-  });
-  const [faceStyle, setFaceStyle] = useState(() => {
-    if (typeof window === "undefined") {
-      return "pixelized";
-    }
-
-    const savedFaceStyle = window.localStorage.getItem(FACE_STYLE_STORAGE_KEY);
-    return savedFaceStyle === "rounded" ? "rounded" : "pixelized";
-  });
+  const { useFillerSpeech, faceStyle } = useStoredPreferences();
   const [mouthMotion, setMouthMotion] = useState(BASE_MOUTH_MOTION);
   const [timings, setTimings] = useState(null);
 
@@ -605,17 +657,6 @@ export default function IrippleHome() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      FILLER_SPEECH_STORAGE_KEY,
-      useFillerSpeech ? "1" : "0",
-    );
-  }, [useFillerSpeech]);
-
-  useEffect(() => {
-    window.localStorage.setItem(FACE_STYLE_STORAGE_KEY, faceStyle);
-  }, [faceStyle]);
-
-  useEffect(() => {
     const AudioContextClass =
       window.AudioContext || window.webkitAudioContext;
     const audioElement = audioRef.current;
@@ -727,12 +768,16 @@ export default function IrippleHome() {
         faceStyle={faceStyle}
         useFillerSpeech={useFillerSpeech}
         onToggleFaceStyle={() =>
-          setFaceStyle((current) =>
-            current === "rounded" ? "pixelized" : "rounded",
+          updateStoredPreference(
+            FACE_STYLE_STORAGE_KEY,
+            faceStyle === "rounded" ? "pixelized" : "rounded",
           )
         }
         onToggleFillerSpeech={() =>
-          setUseFillerSpeech((current) => !current)
+          updateStoredPreference(
+            FILLER_SPEECH_STORAGE_KEY,
+            useFillerSpeech ? "0" : "1",
+          )
         }
       />
 

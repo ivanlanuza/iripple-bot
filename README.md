@@ -2,7 +2,31 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Install the local native dependencies first:
+
+```bash
+brew install ffmpeg whisper-cpp
+```
+
+This app also needs a local Whisper ggml model. By default it looks for:
+
+- `~/.ggml-tiny.en.bin`
+- `~/.ggml-base.en.bin`
+
+If your model lives elsewhere, point the app at it explicitly:
+
+```bash
+export WHISPER_MODEL_PATH=/full/path/to/ggml-model.bin
+```
+
+If either binary lives outside your shell `PATH`, point the app at it explicitly:
+
+```bash
+export FFMPEG_BIN=/full/path/to/ffmpeg
+export WHISPER_BIN=/full/path/to/whisper-cli
+```
+
+Then run the development server:
 
 ```bash
 npm run dev
