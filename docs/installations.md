@@ -31,3 +31,19 @@ To rerun:
 cd local-tts-server
 source venv/bin/activate
 python server.py
+
+===================================
+llama.cpp
+brew install llama.cpp
+
+mkdir -p models
+
+curl -L \
+ -o models/Llama-3.2-3B-Instruct-Q4_K_M.gguf \
+ https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf
+
+curl -L \
+ -o models/nomic-embed-text-v1.5.Q8_0.gguf \
+ https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
+
+create env file

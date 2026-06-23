@@ -1,4 +1,4 @@
-import { embedMany } from "@/lib/server/ollama";
+import { embedMany, resolveEmbedModelPath } from "@/lib/server/llama";
 import { chunkKnowledge, readKnowledgeText, writeEmbeddingStore } from "@/lib/server/rag";
 
 export default async function handler(req, res) {
@@ -12,6 +12,7 @@ export default async function handler(req, res) {
   const overlap = Number(req.body?.overlap || 120);
 
   try {
+    const embedModelPath = await resolveEmbedModelPath(embedModel);
     const knowledgeText = await readKnowledgeText();
     const chunks = chunkKnowledge(knowledgeText, chunkSize, overlap);
 
@@ -28,9 +29,10 @@ export default async function handler(req, res) {
     );
 
     const store = {
-      version: 1,
+      version: 2,
       createdAt: new Date().toISOString(),
       embedModel,
+      embedModelPath,
       chunkSize,
       overlap,
       chunks: chunks.map((chunk, index) => ({

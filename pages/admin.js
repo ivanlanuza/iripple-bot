@@ -1,5 +1,5 @@
 import Head from "next/head";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/router";
 
 const DEFAULT_FORM = {
@@ -9,11 +9,25 @@ const DEFAULT_FORM = {
   overlap: 120,
 };
 
+function subscribeToUnlockState() {
+  return () => {};
+}
+
+function getUnlockState() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.sessionStorage.getItem("iripple-admin-unlocked") === "true";
+}
+
 export default function AdminPage() {
   const router = useRouter();
-  const isUnlocked =
-    typeof window !== "undefined" &&
-    window.sessionStorage.getItem("iripple-admin-unlocked") === "true";
+  const isUnlocked = useSyncExternalStore(
+    subscribeToUnlockState,
+    getUnlockState,
+    () => false,
+  );
   const [form, setForm] = useState(DEFAULT_FORM);
   const [status, setStatus] = useState({
     chunkCount: 0,
@@ -162,7 +176,8 @@ export default function AdminPage() {
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-white/65">
                 This panel edits the local knowledge file and regenerates
-                `data/embeddings.json` through the offline Ollama embed model.
+                `data/embeddings.json` through the local llama.cpp embedding
+                model configured in `.env`.
                 Use `Ctrl + Shift + A` to return to the face.
               </p>
             </div>
@@ -267,7 +282,7 @@ export default function AdminPage() {
                 <p className="mt-4">
                   The visitor-facing screen stays on `/` and this page is only
                   reachable through the global macro. All inference remains
-                  local through Whisper, Ollama, and in-process Kokoro ONNX.
+                  local through Whisper, llama.cpp, and in-process Kokoro ONNX.
                 </p>
               </section>
             </div>

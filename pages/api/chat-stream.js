@@ -3,10 +3,12 @@ import {
   DEFAULT_KEEP_ALIVE,
   embedText,
   generateTextStream,
+  resolveEmbedModelPath,
   resolveChatModel,
   resolveEmbedModel,
-} from "@/lib/server/ollama";
+} from "@/lib/server/llama";
 import {
+  isEmbeddingStoreCompatible,
   loadEmbeddingStore,
   normalizeRobotReply,
   selectBestChunks,
@@ -159,6 +161,12 @@ function buildNoRagReply(store) {
 
   return normalizeRobotReply(
     "[THINKING] Sorry, I don't know the answer to that.",
+  );
+}
+
+function buildStaleEmbeddingsReply() {
+  return normalizeRobotReply(
+    "[THINKING] My local knowledge embeddings were built with a different embedding model. Open the hidden admin panel and rebuild embeddings for the current llama.cpp configuration.",
   );
 }
 
@@ -340,7 +348,62 @@ export default async function handler(req, res) {
     if (store.chunks.length) {
       try {
         embedModel = await resolveEmbedModel(EMBED_MODEL_OVERRIDE);
+        const embedModelPath = await resolveEmbedModelPath(EMBED_MODEL_OVERRIDE);
         tracker.mark("embedModelResolvedMs");
+
+        if (
+          !isEmbeddingStoreCompatible(store, {
+            embedModel,
+            embedModelPath,
+          })
+        ) {
+          const stalePayload = {
+            ...buildStaleEmbeddingsReply(),
+            context: [],
+            ragUsed: false,
+            chatModel: null,
+            embedModel,
+          };
+
+          writeJsonLine(res, {
+            type: "meta",
+            mood: stalePayload.mood,
+            ragUsed: false,
+            cached: false,
+            timings: tracker.snapshot({
+              ragUsed: false,
+              chatModel: null,
+              embedModel,
+            }),
+          });
+          writeJsonLine(res, {
+            type: "sentence",
+            text: stalePayload.text,
+            mood: stalePayload.mood,
+            reply: stalePayload.reply,
+            replyText: stalePayload.text,
+            cached: false,
+          });
+          writeJsonLine(res, {
+            type: "done",
+            ...stalePayload,
+            cached: false,
+            timings: tracker.snapshot({
+              ragUsed: false,
+              chatModel: null,
+              embedModel,
+            }),
+          });
+          res.end();
+          tracker.log({
+            cached: false,
+            ragUsed: false,
+            chatModel: null,
+            embedModel,
+            reason: "stale-embeddings",
+          });
+          return;
+        }
 
         const queryEmbedding = await embedText(
           text,
@@ -362,14 +425,14 @@ export default async function handler(req, res) {
     if (ragError && store.chunks.length && isConnectionError(ragError)) {
       writeJsonLine(res, {
         type: "error",
-        error: "Ollama offline",
+        error: "llama.cpp unavailable",
         timings: tracker.snapshot({
           embedModel,
         }),
       });
       res.end();
       tracker.log({
-        error: "Ollama offline",
+        error: "llama.cpp unavailable",
         embedModel,
       });
       return;

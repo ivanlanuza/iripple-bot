@@ -3,10 +3,12 @@ import {
   DEFAULT_KEEP_ALIVE,
   embedText,
   generateText,
+  resolveEmbedModelPath,
   resolveChatModel,
   resolveEmbedModel,
-} from "@/lib/server/ollama";
+} from "@/lib/server/llama";
 import {
+  isEmbeddingStoreCompatible,
   loadEmbeddingStore,
   normalizeRobotReply,
   selectBestChunks,
@@ -156,6 +158,12 @@ function buildNoRagReply(store) {
   );
 }
 
+function buildStaleEmbeddingsReply() {
+  return normalizeRobotReply(
+    "[THINKING] My local knowledge embeddings were built with a different embedding model. Open the hidden admin panel and rebuild embeddings for the current llama.cpp configuration.",
+  );
+}
+
 function isConnectionError(error) {
   return (
     error?.cause?.code === "ECONNREFUSED" ||
@@ -218,7 +226,41 @@ export default async function handler(req, res) {
     if (store.chunks.length) {
       try {
         embedModel = await resolveEmbedModel(EMBED_MODEL_OVERRIDE);
+        const embedModelPath = await resolveEmbedModelPath(EMBED_MODEL_OVERRIDE);
         tracker.mark("embedModelResolvedMs");
+
+        if (
+          !isEmbeddingStoreCompatible(store, {
+            embedModel,
+            embedModelPath,
+          })
+        ) {
+          const stalePayload = {
+            ...buildStaleEmbeddingsReply(),
+            context: [],
+            ragUsed: false,
+            chatModel: null,
+            embedModel,
+          };
+
+          res.status(200).json({
+            ...stalePayload,
+            timings: tracker.snapshot({
+              ragUsed: false,
+              chatModel: null,
+              embedModel,
+            }),
+          });
+          tracker.log({
+            cached: false,
+            ragUsed: false,
+            chatModel: null,
+            embedModel,
+            reason: "stale-embeddings",
+          });
+          return;
+        }
+
         const queryEmbedding = await embedText(
           text,
           embedModel,
@@ -236,9 +278,9 @@ export default async function handler(req, res) {
     }
 
     if (ragError && store.chunks.length && isConnectionError(ragError)) {
-      tracker.log({ error: "Ollama offline", embedModel });
+      tracker.log({ error: "llama.cpp unavailable", embedModel });
       res.status(503).json({
-        error: "Ollama offline",
+        error: "llama.cpp unavailable",
         timings: tracker.snapshot({
           embedModel,
         }),
@@ -336,9 +378,9 @@ export default async function handler(req, res) {
     });
     return;
   } catch (error) {
-    tracker.log({ error: error.message || "Ollama offline" });
+    tracker.log({ error: error.message || "llama.cpp unavailable" });
     res.status(500).json({
-      error: error.message || "Ollama offline",
+      error: error.message || "llama.cpp unavailable",
       timings: tracker.snapshot(),
     });
     return;

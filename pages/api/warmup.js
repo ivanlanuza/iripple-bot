@@ -2,7 +2,7 @@ import {
   warmModels,
   resolveChatModel,
   resolveEmbedModel,
-} from "@/lib/server/ollama";
+} from "@/lib/server/llama";
 import { loadEmbeddingStore } from "@/lib/server/rag";
 import { primeSpeechCache } from "@/lib/server/speech";
 import { createTimingTracker } from "@/lib/server/timing";

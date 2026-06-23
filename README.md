@@ -1,14 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+## Local Runtime
 
-## Getting Started
+This app now runs local LLM inference through `llama.cpp` directly. Ollama is no longer used.
 
-Install the local native dependencies first:
+Install the native dependencies first:
 
 ```bash
-brew install ffmpeg whisper-cpp
+brew install ffmpeg whisper-cpp llama.cpp
 ```
 
-This app also needs a local Whisper ggml model. By default it looks for:
+`llama.cpp` must provide `llama-server` on your `PATH`. If it does not, set `LLAMA_CPP_BIN` in `.env.local`.
+
+## Model Config
+
+Copy [.env.example](/Users/ivanlanuza/Dropbox/Ivan/Coding/NextJS/iripple-bot/.env.example) to `.env.local` and set the GGUF paths you want to use.
+
+Model selection is alias-based:
+
+- `IRIPPLE_CHAT_MODEL=llama3.2:3b`
+- `IRIPPLE_CHAT_MODEL=gemma3:1b`
+- `IRIPPLE_CHAT_MODEL=mistral`
+- `IRIPPLE_CHAT_MODEL=qwen2.5`
+
+Each alias resolves through an env var named `IRIPPLE_MODEL_<NORMALIZED_ALIAS>_PATH`. For example:
+
+- `llama3.2:3b` becomes `IRIPPLE_MODEL_LLAMA3_2_3B_PATH`
+- `gemma3:1b` becomes `IRIPPLE_MODEL_GEMMA3_1B_PATH`
+- `qwen2.5` becomes `IRIPPLE_MODEL_QWEN2_5_PATH`
+
+Use a dedicated embedding model such as `nomic-embed-text` and point it at a GGUF file with `IRIPPLE_MODEL_NOMIC_EMBED_TEXT_PATH`.
+
+When you change the embedding model or its GGUF path, rebuild `data/embeddings.json` from the hidden admin panel before asking RAG questions again.
+
+## Whisper Setup
+
+The app also needs a local Whisper ggml model. By default it looks for:
 
 - `~/.ggml-tiny.en.bin`
 - `~/.ggml-base.en.bin`
@@ -26,39 +51,14 @@ export FFMPEG_BIN=/full/path/to/ffmpeg
 export WHISPER_BIN=/full/path/to/whisper-cli
 ```
 
+## Running
+
 Then run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
-
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
-
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
-
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+The app starts dedicated `llama-server` processes for chat and embeddings on demand, using the model aliases and runtime settings from `.env.local`.
