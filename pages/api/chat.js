@@ -1,4 +1,16 @@
-import { createSystemPrompt } from "@/lib/server/chat-prompt";
+import {
+  createSystemPrompt,
+  createUserPrompt,
+} from "@/lib/server/chat-prompt";
+import {
+  buildKnowledgeUnavailableReply,
+  buildStaleEmbeddingsReply,
+  hasKeywordSupport,
+  isConnectionError,
+  isFaqStructuredChunk,
+  isRetailContextQuestion,
+  isShortFaqQuestion,
+} from "@/lib/server/chat-helpers";
 import {
   DEFAULT_KEEP_ALIVE,
   embedText,
@@ -27,45 +39,6 @@ const FAQ_RAG_TOP_SCORE = Number(
 );
 const CHAT_CACHE_VERSION = "v6";
 const responseCache = new Map();
-const STOP_WORDS = new Set([
-  "the",
-  "and",
-  "for",
-  "are",
-  "not",
-  "but",
-  "can",
-  "our",
-  "you",
-  "about",
-  "after",
-  "also",
-  "been",
-  "does",
-  "from",
-  "have",
-  "into",
-  "that",
-  "their",
-  "them",
-  "they",
-  "this",
-  "what",
-  "when",
-  "where",
-  "which",
-  "while",
-  "with",
-  "would",
-  "your",
-  "tell",
-  "please",
-  "won",
-  "finals",
-  "who",
-  "how",
-  "why",
-]);
 
 function trimCache(cache, maxSize) {
   while (cache.size > maxSize) {
@@ -80,98 +53,6 @@ function normalizeCacheKey(text, store) {
   return `${CHAT_CACHE_VERSION}::${storeVersion}::${normalizedText}`;
 }
 
-function buildPrompt(text, matches) {
-  const context = matches.length
-    ? matches.map((match) => match.text).join("\n---\n")
-    : "none";
-
-  return `Question: ${text}\nContext: ${context}`;
-}
-
-function getQueryKeywords(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(
-      (token) =>
-        (token.length >= 4 || token === "pos") && !STOP_WORDS.has(token),
-    );
-}
-
-function hasKeywordSupport(text, matches) {
-  const keywords = getQueryKeywords(text);
-  if (!keywords.length) {
-    return false;
-  }
-
-  const contextTokens = new Set(
-    matches
-      .map((match) => match.text.toLowerCase())
-      .join(" ")
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter(Boolean),
-  );
-
-  return keywords.some((keyword) => contextTokens.has(keyword));
-}
-
-function isRetailContextQuestion(text) {
-  return /\b(iripple|barter|nrce|pra|retail|retailer|store|stores|checkout|inventory|shrinkage|stock|branch|branches|loyalty|pos|philippine|philippines)\b/i.test(
-    text,
-  );
-}
-
-function isFaqStructuredChunk(text) {
-  return /(frequently asked questions|(^|\n)\s*q:\s|(^|\n)\s*a:\s)/i.test(
-    text || "",
-  );
-}
-
-function isShortFaqQuestion(text) {
-  const normalized = String(text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!normalized) {
-    return false;
-  }
-
-  const words = normalized.split(" ").filter(Boolean);
-  return words.length <= 6 && text.includes("?");
-}
-
-function buildNoRagReply(store) {
-  if (!store?.chunks?.length) {
-    return normalizeRobotReply(
-      "[THINKING] I cannot answer that yet because my local booth knowledge has not been embedded. Please open the hidden admin panel and rebuild the embeddings. After that, ask me again and I will answer from the local RAG source only.",
-    );
-  }
-
-  return normalizeRobotReply(
-    "[THINKING] Sorry, I don't know the answer to that.",
-  );
-}
-
-function buildStaleEmbeddingsReply() {
-  return normalizeRobotReply(
-    "[THINKING] My local knowledge embeddings were built with a different embedding model. Open the hidden admin panel and rebuild embeddings for the current llama.cpp configuration.",
-  );
-}
-
-function isConnectionError(error) {
-  return (
-    error?.cause?.code === "ECONNREFUSED" ||
-    error?.cause?.code === "ECONNRESET" ||
-    error?.cause?.code === "ETIMEDOUT" ||
-    /fetch failed/i.test(error?.message || "")
-  );
-}
 
 export default async function handler(req, res) {
   const tracker = createTimingTracker("chat");
@@ -306,7 +187,7 @@ export default async function handler(req, res) {
 
     if (!ragConfidenceOk) {
       const noRagPayload = {
-        ...buildNoRagReply(store),
+        ...buildKnowledgeUnavailableReply("rag", store),
         context: [],
         ragUsed: false,
         chatModel: null,
@@ -335,8 +216,12 @@ export default async function handler(req, res) {
 
     const rawReply = await generateText({
       model: chatModel,
-      system: createSystemPrompt(),
-      prompt: buildPrompt(text, contextMatches),
+      system: createSystemPrompt({ knowledgeMode: "rag" }),
+      prompt: createUserPrompt({
+        text,
+        matches: contextMatches,
+        knowledgeMode: "rag",
+      }),
       keepAlive: MODEL_KEEP_ALIVE,
       options: {
         temperature: 0.1,
