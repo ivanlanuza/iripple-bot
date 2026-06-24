@@ -8,6 +8,11 @@ import {
 } from "react";
 
 import RobotFace from "@/components/RobotFace";
+import {
+  KNOWLEDGE_MODE_RAG,
+  KNOWLEDGE_MODE_RAW,
+  normalizeKnowledgeMode,
+} from "@/lib/knowledge-mode";
 
 const BASE_MOUTH_MOTION = {
   openness: 0.14,
@@ -17,10 +22,12 @@ const BASE_MOUTH_MOTION = {
 };
 const DEFAULT_FACE_STYLE = "pixelized";
 const DEFAULT_USE_FILLER_SPEECH = false;
+const DEFAULT_KNOWLEDGE_MODE = KNOWLEDGE_MODE_RAG;
 const FACE_STYLE_STORAGE_KEY = "iripple:face-style";
 const FILLER_SPEECH_STORAGE_KEY = "iripple:use-filler-speech";
+const KNOWLEDGE_MODE_STORAGE_KEY = "iripple:knowledge-mode";
 const PREFERENCES_EVENT = "iripple:preferences-changed";
-const DEFAULT_PREFERENCES_SNAPSHOT = `${DEFAULT_FACE_STYLE}|0`;
+const DEFAULT_PREFERENCES_SNAPSHOT = `${DEFAULT_FACE_STYLE}|0|${DEFAULT_KNOWLEDGE_MODE}`;
 
 function getStoredPreferencesSnapshot() {
   if (typeof window === "undefined") {
@@ -31,8 +38,11 @@ function getStoredPreferencesSnapshot() {
   const faceStyle = savedFaceStyle === "rounded" ? "rounded" : DEFAULT_FACE_STYLE;
   const useFillerSpeech =
     window.localStorage.getItem(FILLER_SPEECH_STORAGE_KEY) === "1";
+  const knowledgeMode = normalizeKnowledgeMode(
+    window.localStorage.getItem(KNOWLEDGE_MODE_STORAGE_KEY),
+  );
 
-  return `${faceStyle}|${useFillerSpeech ? "1" : "0"}`;
+  return `${faceStyle}|${useFillerSpeech ? "1" : "0"}|${knowledgeMode}`;
 }
 
 function subscribeToPreferences(callback) {
@@ -44,7 +54,8 @@ function subscribeToPreferences(callback) {
     if (
       !event.key ||
       event.key === FACE_STYLE_STORAGE_KEY ||
-      event.key === FILLER_SPEECH_STORAGE_KEY
+      event.key === FILLER_SPEECH_STORAGE_KEY ||
+      event.key === KNOWLEDGE_MODE_STORAGE_KEY
     ) {
       callback();
     }
@@ -66,10 +77,12 @@ function useStoredPreferences() {
     () => DEFAULT_PREFERENCES_SNAPSHOT,
   );
 
-  const [faceStyleToken, useFillerSpeechToken] = snapshot.split("|");
+  const [faceStyleToken, useFillerSpeechToken, knowledgeModeToken] =
+    snapshot.split("|");
   return {
     faceStyle: faceStyleToken === "rounded" ? "rounded" : DEFAULT_FACE_STYLE,
     useFillerSpeech: useFillerSpeechToken === "1",
+    knowledgeMode: normalizeKnowledgeMode(knowledgeModeToken),
   };
 }
 
@@ -85,7 +98,7 @@ export default function IrippleHome() {
   const [mood, setMood] = useState("HAPPY");
   const [error, setError] = useState("");
   const [debugMode, setDebugMode] = useState(false);
-  const { useFillerSpeech, faceStyle } = useStoredPreferences();
+  const { useFillerSpeech, faceStyle, knowledgeMode } = useStoredPreferences();
   const [mouthMotion, setMouthMotion] = useState(BASE_MOUTH_MOTION);
   const [timings, setTimings] = useState(null);
 
@@ -103,11 +116,20 @@ export default function IrippleHome() {
   const currentAudioUrlRef = useRef(null);
   const speechRequestQueueRef = useRef([]);
   const speechQueueActiveRef = useRef(false);
-  const interactionStartedAtRef = useRef(0);
+  const voiceInputEndedAtRef = useRef(0);
+  const transcriptReadyAtRef = useRef(0);
+  const answerGenerationStartedAtRef = useRef(0);
+  const firstAnswerSpeechRequestAtRef = useRef(0);
   const firstSpeechChunkMsRef = useRef(null);
+  const firstAudioPlaybackMsRef = useRef(null);
+  const firstKokoroStartMsRef = useRef(null);
 
   function roundDuration(ms) {
     return Math.round(ms * 10) / 10;
+  }
+
+  function logClientPerf(label, payload) {
+    console.info(`[perf][client] ${label} ${JSON.stringify(payload)}`);
   }
 
   function mergeTimings(nextValues) {
@@ -115,10 +137,30 @@ export default function IrippleHome() {
       return;
     }
 
-    setTimings((current) => ({
-      ...(current || {}),
-      ...nextValues,
-    }));
+    setTimings((current) => {
+      const merged = { ...(current || {}) };
+
+      Object.entries(nextValues).forEach(([key, value]) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          merged[key] &&
+          typeof merged[key] === "object" &&
+          !Array.isArray(merged[key])
+        ) {
+          merged[key] = {
+            ...merged[key],
+            ...value,
+          };
+          return;
+        }
+
+        merged[key] = value;
+      });
+
+      return merged;
+    });
   }
 
   function hasPendingPipelineWork() {
@@ -127,6 +169,15 @@ export default function IrippleHome() {
       speechQueueActiveRef.current ||
       speechRequestQueueRef.current.length > 0
     );
+  }
+
+  function resetInteractionTimingRefs() {
+    transcriptReadyAtRef.current = 0;
+    answerGenerationStartedAtRef.current = 0;
+    firstAnswerSpeechRequestAtRef.current = 0;
+    firstSpeechChunkMsRef.current = null;
+    firstAudioPlaybackMsRef.current = null;
+    firstKokoroStartMsRef.current = null;
   }
 
   function getBaseMouthMotion(nextMood = mood) {
@@ -197,7 +248,8 @@ export default function IrippleHome() {
     pendingSpeechStreamsRef.current = 0;
     speechRequestQueueRef.current = [];
     speechQueueActiveRef.current = false;
-    firstSpeechChunkMsRef.current = null;
+    resetInteractionTimingRefs();
+    voiceInputEndedAtRef.current = 0;
 
     if (audioRef.current) {
       audioRef.current.pause();
@@ -270,6 +322,21 @@ export default function IrippleHome() {
     audioRef.current.currentTime = 0;
     setStage("speaking");
     await audioRef.current.play();
+
+    if (firstAudioPlaybackMsRef.current == null && voiceInputEndedAtRef.current) {
+      firstAudioPlaybackMsRef.current = roundDuration(
+        performance.now() - voiceInputEndedAtRef.current,
+      );
+      mergeTimings({
+        summary: {
+          voiceEndToFirstAudioMs: firstAudioPlaybackMsRef.current,
+        },
+      });
+      logClientPerf("first-audio", {
+        voiceEndToFirstAudioMs: firstAudioPlaybackMsRef.current,
+      });
+    }
+
     updateMouthFromAnalyser();
   }
 
@@ -290,12 +357,14 @@ export default function IrippleHome() {
         await playReplyStream(sentence, {
           append: true,
           onFirstChunk: () => {
-            if (firstSpeechChunkMsRef.current == null) {
+            if (firstSpeechChunkMsRef.current == null && voiceInputEndedAtRef.current) {
               firstSpeechChunkMsRef.current = roundDuration(
-                performance.now() - interactionStartedAtRef.current,
+                performance.now() - voiceInputEndedAtRef.current,
               );
               mergeTimings({
-                firstSpeechChunkMs: firstSpeechChunkMsRef.current,
+                summary: {
+                  voiceEndToFirstSpeechChunkMs: firstSpeechChunkMsRef.current,
+                },
               });
             }
           },
@@ -339,6 +408,22 @@ export default function IrippleHome() {
 
     pendingSpeechStreamsRef.current += 1;
 
+    const isAnswerSpeech = !options.fillerOnly;
+    const speechRequestStartedAt = performance.now();
+    if (isAnswerSpeech && !firstAnswerSpeechRequestAtRef.current) {
+      firstAnswerSpeechRequestAtRef.current = speechRequestStartedAt;
+
+      if (answerGenerationStartedAtRef.current) {
+        mergeTimings({
+          summary: {
+            answerStartToSpeechRequestMs: roundDuration(
+              speechRequestStartedAt - answerGenerationStartedAtRef.current,
+            ),
+          },
+        });
+      }
+    }
+
     try {
       const speechResponse = await fetch("/api/speak-stream", {
         method: "POST",
@@ -381,6 +466,36 @@ export default function IrippleHome() {
             }
 
             if (message.type === "chunk") {
+              if (message.timings) {
+                mergeTimings({
+                  speech: message.timings,
+                });
+              }
+
+              if (
+                isAnswerSpeech &&
+                firstKokoroStartMsRef.current == null &&
+                firstAnswerSpeechRequestAtRef.current &&
+                answerGenerationStartedAtRef.current &&
+                Number.isFinite(message.timings?.speechRequestToKokoroStartMs)
+              ) {
+                firstKokoroStartMsRef.current = roundDuration(
+                  firstAnswerSpeechRequestAtRef.current -
+                    answerGenerationStartedAtRef.current +
+                    message.timings.speechRequestToKokoroStartMs,
+                );
+                mergeTimings({
+                  summary: {
+                    answerStartToKokoroStartMs:
+                      firstKokoroStartMsRef.current,
+                  },
+                });
+                logClientPerf("kokoro-start", {
+                  answerStartToKokoroStartMs:
+                    firstKokoroStartMsRef.current,
+                });
+              }
+
               if (!firstChunkSeen) {
                 firstChunkSeen = true;
                 options.onFirstChunk?.();
@@ -394,6 +509,12 @@ export default function IrippleHome() {
               if (!playbackActiveRef.current) {
                 await playNextQueuedChunk();
               }
+            }
+
+            if (message.type === "done" && message.timings) {
+              mergeTimings({
+                speech: message.timings,
+              });
             }
           }
 
@@ -421,14 +542,17 @@ export default function IrippleHome() {
     }
   }
 
-  async function streamChatReply(cleanTranscript) {
+  async function streamChatReply(cleanTranscript, nextKnowledgeMode) {
     pendingSpeechStreamsRef.current += 1;
 
     try {
       const chatResponse = await fetch("/api/chat-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: cleanTranscript }),
+        body: JSON.stringify({
+          text: cleanTranscript,
+          knowledgeMode: nextKnowledgeMode,
+        }),
       });
 
       if (!chatResponse.ok) {
@@ -461,11 +585,34 @@ export default function IrippleHome() {
             }
 
             if (message.type === "meta") {
+              if (!answerGenerationStartedAtRef.current) {
+                answerGenerationStartedAtRef.current =
+                  transcriptReadyAtRef.current &&
+                  Number.isFinite(message.timings?.questionToAnswerStartMs)
+                    ? transcriptReadyAtRef.current +
+                      message.timings.questionToAnswerStartMs
+                    : performance.now();
+                logClientPerf("answer-start", {
+                  questionToAnswerStartMs:
+                    message.timings?.questionToAnswerStartMs ?? null,
+                  knowledgeMode:
+                    message.knowledgeMode || nextKnowledgeMode,
+                });
+              }
+
               const nextMood = message.mood || "THINKING";
               setMood(nextMood);
               setMouthMotion(getBaseMouthMotion(nextMood));
               mergeTimings({
                 chat: message.timings || undefined,
+                summary: {
+                  questionToAnswerStartMs:
+                    message.timings?.questionToAnswerStartMs ?? null,
+                },
+                request: {
+                  knowledgeMode:
+                    message.knowledgeMode || nextKnowledgeMode,
+                },
               });
             }
 
@@ -484,6 +631,20 @@ export default function IrippleHome() {
               setReply(message.reply || "");
               mergeTimings({
                 chat: message.timings || undefined,
+                summary: {
+                  answerGenerationMs:
+                    message.timings?.answerGenerationMs ?? null,
+                },
+                request: {
+                  knowledgeMode:
+                    message.knowledgeMode || nextKnowledgeMode,
+                },
+              });
+              logClientPerf("answer-done", {
+                answerGenerationMs:
+                  message.timings?.answerGenerationMs ?? null,
+                knowledgeMode:
+                  message.knowledgeMode || nextKnowledgeMode,
               });
             }
           }
@@ -518,8 +679,7 @@ export default function IrippleHome() {
     formData.append("audio", audioBlob, "input.webm");
 
     try {
-      interactionStartedAtRef.current = performance.now();
-      firstSpeechChunkMsRef.current = null;
+      resetInteractionTimingRefs();
       setTimings(null);
 
       const transcriptionResponse = await fetch("/api/transcribe", {
@@ -533,12 +693,23 @@ export default function IrippleHome() {
       }
 
       const cleanTranscript = String(transcriptionData.text || "").trim();
+      transcriptReadyAtRef.current = performance.now();
       setTranscript(cleanTranscript);
+      const voiceEndToTranscriptionDoneMs = voiceInputEndedAtRef.current
+        ? roundDuration(transcriptReadyAtRef.current - voiceInputEndedAtRef.current)
+        : null;
       mergeTimings({
         transcribe: transcriptionData.timings || undefined,
-        transcribeClientMs: roundDuration(
-          performance.now() - interactionStartedAtRef.current,
-        ),
+        summary: {
+          voiceEndToTranscriptionDoneMs,
+        },
+        request: {
+          knowledgeMode,
+        },
+      });
+      logClientPerf("transcription-done", {
+        voiceEndToTranscriptionDoneMs,
+        knowledgeMode,
       });
 
       if (!cleanTranscript) {
@@ -569,7 +740,7 @@ export default function IrippleHome() {
         : Promise.resolve().then(() => {
             resolveFillerStart?.();
           });
-      const chatStreamPromise = streamChatReply(cleanTranscript);
+      const chatStreamPromise = streamChatReply(cleanTranscript, knowledgeMode);
 
       await Promise.race([
         fillerStarted,
@@ -589,6 +760,7 @@ export default function IrippleHome() {
   async function startRecording() {
     setError("");
     setStage("listening");
+    resetInteractionTimingRefs();
     setMouthMotion({
       openness: 0.2,
       width: 1.06,
@@ -630,6 +802,7 @@ export default function IrippleHome() {
       return;
     }
 
+    voiceInputEndedAtRef.current = performance.now();
     mediaRecorderRef.current.stop();
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -766,6 +939,7 @@ export default function IrippleHome() {
         error={error}
         mouthMotion={mouthMotion}
         faceStyle={faceStyle}
+        knowledgeMode={knowledgeMode}
         useFillerSpeech={useFillerSpeech}
         onToggleFaceStyle={() =>
           updateStoredPreference(
@@ -777,6 +951,14 @@ export default function IrippleHome() {
           updateStoredPreference(
             FILLER_SPEECH_STORAGE_KEY,
             useFillerSpeech ? "0" : "1",
+          )
+        }
+        onToggleKnowledgeMode={() =>
+          updateStoredPreference(
+            KNOWLEDGE_MODE_STORAGE_KEY,
+            knowledgeMode === KNOWLEDGE_MODE_RAW
+              ? KNOWLEDGE_MODE_RAG
+              : KNOWLEDGE_MODE_RAW,
           )
         }
       />

@@ -2,6 +2,7 @@ import {
   areSpeechChunksCached,
   getFillerPhrase,
   getSpeechDefaults,
+  isSpeechChunkCached,
   splitSpeechText,
   synthesizeSpeechBuffer,
 } from "@/lib/server/speech";
@@ -12,6 +13,32 @@ export const config = {
     responseLimit: false,
   },
 };
+
+function roundDuration(ms) {
+  return Math.round(ms * 10) / 10;
+}
+
+function deriveDuration(startMs, endMs) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return null;
+  }
+
+  return roundDuration(endMs - startMs);
+}
+
+function buildTimingPayload(tracker, extra = {}) {
+  const snapshot = tracker.snapshot(extra);
+
+  return {
+    ...snapshot,
+    speechRequestToKokoroStartMs: snapshot.kokoroStartMs ?? null,
+    speechGenerationMs: deriveDuration(
+      snapshot.kokoroStartMs,
+      snapshot.finalChunkReadyMs,
+    ),
+    speechRequestToFirstAudioChunkMs: snapshot.firstAudioChunkReadyMs ?? null,
+  };
+}
 
 function writeJsonLine(res, payload) {
   res.write(`${JSON.stringify(payload)}\n`);
@@ -41,25 +68,75 @@ export default async function handler(req, res) {
   res.setHeader("Transfer-Encoding", "chunked");
 
   try {
-    if (fillerOnly) {
-      const fillerText = getFillerPhrase();
-      const fillerAudio = await synthesizeSpeechBuffer(fillerText, voice);
-      tracker.mark("fillerReadyMs");
+    let firstChunkSent = false;
+
+    const markKokoroStart = () => {
+      const snapshot = tracker.snapshot();
+      if (snapshot.kokoroStartMs === undefined) {
+        tracker.mark("kokoroStartMs");
+      }
+    };
+
+    const writeChunk = ({
+      chunkText,
+      audioBuffer,
+      isFiller,
+      cached,
+      index,
+    }) => {
+      if (!firstChunkSent) {
+        tracker.mark("firstAudioChunkReadyMs");
+        firstChunkSent = true;
+      }
+
+      if (typeof index === "number") {
+        tracker.mark(`chunk${index + 1}ReadyMs`);
+      } else {
+        tracker.mark("fillerReadyMs");
+      }
+
       writeJsonLine(res, {
         type: "chunk",
-        text: fillerText,
-        isFiller: true,
+        text: chunkText,
+        isFiller,
+        cached,
         mimeType: "audio/wav",
-        audio: fillerAudio.toString("base64"),
+        audio: audioBuffer.toString("base64"),
+        timings: buildTimingPayload(tracker, {
+          fillerOnly,
+          voice,
+        }),
       });
+    };
+
+    if (fillerOnly) {
+      const fillerText = getFillerPhrase();
+      const cached = isSpeechChunkCached(fillerText, voice);
+      if (!cached) {
+        markKokoroStart();
+      }
+
+      const fillerAudio = await synthesizeSpeechBuffer(fillerText, voice);
+      writeChunk({
+        chunkText: fillerText,
+        audioBuffer: fillerAudio,
+        isFiller: true,
+        cached,
+      });
+      tracker.mark("finalChunkReadyMs");
       writeJsonLine(res, {
         type: "done",
+        timings: buildTimingPayload(tracker, {
+          fillerOnly: true,
+          voice,
+          cached,
+        }),
       });
       res.end();
       tracker.log({
         fillerOnly: true,
         voice,
-        cached: true,
+        cached,
       });
       return;
     }
@@ -70,31 +147,45 @@ export default async function handler(req, res) {
 
     if (useFiller && !allChunksCached) {
       const fillerText = getFillerPhrase();
+      const fillerCached = isSpeechChunkCached(fillerText, voice);
+      if (!fillerCached) {
+        markKokoroStart();
+      }
+
       const fillerAudio = await synthesizeSpeechBuffer(fillerText, voice);
-      tracker.mark("fillerReadyMs");
-      writeJsonLine(res, {
-        type: "chunk",
-        text: fillerText,
+      writeChunk({
+        chunkText: fillerText,
+        audioBuffer: fillerAudio,
         isFiller: true,
-        mimeType: "audio/wav",
-        audio: fillerAudio.toString("base64"),
+        cached: fillerCached,
       });
     }
 
     for (const [index, chunkText] of chunks.entries()) {
+      const cached = isSpeechChunkCached(chunkText, voice);
+      if (!cached) {
+        markKokoroStart();
+      }
+
       const chunkAudio = await synthesizeSpeechBuffer(chunkText, voice);
-      tracker.mark(`chunk${index + 1}ReadyMs`);
-      writeJsonLine(res, {
-        type: "chunk",
-        text: chunkText,
+      writeChunk({
+        chunkText,
+        audioBuffer: chunkAudio,
         isFiller: false,
-        mimeType: "audio/wav",
-        audio: chunkAudio.toString("base64"),
+        cached,
+        index,
       });
     }
 
+    tracker.mark("finalChunkReadyMs");
     writeJsonLine(res, {
       type: "done",
+      timings: buildTimingPayload(tracker, {
+        fillerOnly: false,
+        voice,
+        chunkCount: chunks.length,
+        cached: allChunksCached,
+      }),
     });
     res.end();
     tracker.log({
@@ -103,7 +194,6 @@ export default async function handler(req, res) {
       chunkCount: chunks.length,
       cached: allChunksCached,
     });
-    return;
   } catch (error) {
     tracker.log({ error: error.message || "Speech streaming failed" });
     writeJsonLine(res, {
@@ -111,6 +201,5 @@ export default async function handler(req, res) {
       error: error.message || "Speech streaming failed",
     });
     res.end();
-    return;
   }
 }

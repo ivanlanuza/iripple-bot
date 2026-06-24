@@ -1,4 +1,7 @@
-import { createSystemPrompt } from "@/lib/server/chat-prompt";
+import {
+  createSystemPrompt,
+  createUserPrompt,
+} from "@/lib/server/chat-prompt";
 import {
   DEFAULT_KEEP_ALIVE,
   embedText,
@@ -10,10 +13,15 @@ import {
 import {
   isEmbeddingStoreCompatible,
   loadEmbeddingStore,
+  loadKnowledgeDocument,
   normalizeRobotReply,
   selectBestChunks,
 } from "@/lib/server/rag";
 import { createTimingTracker } from "@/lib/server/timing";
+import {
+  KNOWLEDGE_MODE_RAW,
+  normalizeKnowledgeMode,
+} from "@/lib/knowledge-mode";
 
 const CHAT_MODEL_OVERRIDE = process.env.IRIPPLE_CHAT_MODEL;
 const EMBED_MODEL_OVERRIDE = process.env.IRIPPLE_EMBED_MODEL;
@@ -25,7 +33,7 @@ const MIN_RAG_TOP_SCORE = Number(
 const FAQ_RAG_TOP_SCORE = Number(
   process.env.IRIPPLE_FAQ_TOP_SCORE || "0.45",
 );
-const CHAT_CACHE_VERSION = "stream-v4";
+const CHAT_CACHE_VERSION = "stream-v5";
 const responseCache = new Map();
 const STOP_WORDS = new Set([
   "the",
@@ -66,12 +74,32 @@ const STOP_WORDS = new Set([
   "how",
   "why",
 ]);
+const CHAT_OPTIONS_BY_MODE = {
+  rag: {
+    temperature: 0.1,
+    top_p: 0.9,
+    repeat_penalty: 1.05,
+    num_predict: 140,
+    cache_prompt: true,
+  },
+  raw: {
+    temperature: 0.05,
+    top_p: 0.82,
+    repeat_penalty: 1.08,
+    num_predict: 160,
+    cache_prompt: true,
+  },
+};
 
 export const config = {
   api: {
     responseLimit: false,
   },
 };
+
+function roundDuration(ms) {
+  return Math.round(ms * 10) / 10;
+}
 
 function trimCache(cache, maxSize) {
   while (cache.size > maxSize) {
@@ -80,18 +108,62 @@ function trimCache(cache, maxSize) {
   }
 }
 
-function normalizeCacheKey(text, store) {
+function buildCacheKey({ text, knowledgeMode, sourceVersion }) {
   const normalizedText = text.toLowerCase().replace(/\s+/g, " ").trim();
-  const storeVersion = store?.createdAt || "no-store";
-  return `${CHAT_CACHE_VERSION}::${storeVersion}::${normalizedText}`;
+  return `${CHAT_CACHE_VERSION}::${knowledgeMode}::${sourceVersion}::${normalizedText}`;
 }
 
-function buildPrompt(text, matches) {
-  const context = matches.length
-    ? matches.map((match) => match.text).join("\n---\n")
-    : "none";
+function getChatOptions(knowledgeMode) {
+  return CHAT_OPTIONS_BY_MODE[knowledgeMode] || CHAT_OPTIONS_BY_MODE.rag;
+}
 
-  return `Question: ${text}\nContext: ${context}`;
+function deriveDuration(startMs, endMs) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return null;
+  }
+
+  return roundDuration(endMs - startMs);
+}
+
+function buildTimingPayload(tracker, extra = {}) {
+  const snapshot = tracker.snapshot(extra);
+
+  return {
+    ...snapshot,
+    questionToAnswerStartMs: snapshot.llmFirstTokenMs ?? null,
+    answerGenerationMs: deriveDuration(
+      snapshot.llmFirstTokenMs,
+      snapshot.llmDoneMs,
+    ),
+    ragLookupMs: deriveDuration(
+      snapshot.embedModelResolvedMs,
+      snapshot.ragSelectedMs,
+    ),
+  };
+}
+
+function buildKnowledgeUnavailableReply(knowledgeMode, store) {
+  if (knowledgeMode === KNOWLEDGE_MODE_RAW) {
+    return normalizeRobotReply(
+      "[THINKING] I cannot answer that yet because my local booth knowledge file is empty. Please update data knowledge before asking again.",
+    );
+  }
+
+  if (!store?.chunks?.length) {
+    return normalizeRobotReply(
+      "[THINKING] I cannot answer that yet because my local booth knowledge has not been embedded. Please open the hidden admin panel and rebuild the embeddings. After that, ask me again and I will answer from the local RAG source only.",
+    );
+  }
+
+  return normalizeRobotReply(
+    "[THINKING] Sorry, I don't know the answer to that.",
+  );
+}
+
+function buildStaleEmbeddingsReply() {
+  return normalizeRobotReply(
+    "[THINKING] My local knowledge embeddings were built with a different embedding model. Open the hidden admin panel and rebuild embeddings for the current llama.cpp configuration.",
+  );
 }
 
 function getQueryKeywords(text) {
@@ -150,24 +222,6 @@ function isShortFaqQuestion(text) {
 
   const words = normalized.split(" ").filter(Boolean);
   return words.length <= 6 && text.includes("?");
-}
-
-function buildNoRagReply(store) {
-  if (!store?.chunks?.length) {
-    return normalizeRobotReply(
-      "[THINKING] I cannot answer that yet because my local booth knowledge has not been embedded. Please open the hidden admin panel and rebuild the embeddings. After that, ask me again and I will answer from the local RAG source only.",
-    );
-  }
-
-  return normalizeRobotReply(
-    "[THINKING] Sorry, I don't know the answer to that.",
-  );
-}
-
-function buildStaleEmbeddingsReply() {
-  return normalizeRobotReply(
-    "[THINKING] My local knowledge embeddings were built with a different embedding model. Open the hidden admin panel and rebuild embeddings for the current llama.cpp configuration.",
-  );
 }
 
 function isConnectionError(error) {
@@ -255,6 +309,175 @@ function buildContextPayload(contextMatches) {
   }));
 }
 
+async function streamReply({
+  res,
+  tracker,
+  text,
+  knowledgeMode,
+  knowledgeText = "",
+  contextMatches = [],
+  embedModel = null,
+  cacheKey,
+}) {
+  const chatModel = await resolveChatModel(CHAT_MODEL_OVERRIDE);
+  tracker.mark("chatModelResolvedMs");
+
+  const systemPrompt = createSystemPrompt({
+    knowledgeMode,
+    knowledgeText,
+  });
+  const userPrompt = createUserPrompt({
+    text,
+    matches: contextMatches,
+    knowledgeMode,
+  });
+  tracker.mark("promptBuiltMs");
+
+  let rawReply = "";
+  let consumedLength = 0;
+  let detectedMood = null;
+  let metaSent = false;
+  let firstTokenSeen = false;
+  const spokenSentences = [];
+  const ragUsed = knowledgeMode !== KNOWLEDGE_MODE_RAW;
+  const chatOptions = getChatOptions(knowledgeMode);
+
+  for await (const chunk of generateTextStream({
+    model: chatModel,
+    system: systemPrompt,
+    prompt: userPrompt,
+    keepAlive: MODEL_KEEP_ALIVE,
+    options: chatOptions,
+  })) {
+    if (chunk.response) {
+      rawReply += chunk.response;
+
+      if (!firstTokenSeen) {
+        firstTokenSeen = true;
+        tracker.mark("llmFirstTokenMs");
+      }
+
+      const replyParts = parseReplyParts(rawReply);
+      if (!detectedMood && replyParts.mood) {
+        detectedMood = replyParts.mood;
+      }
+
+      if (!metaSent && detectedMood) {
+        metaSent = true;
+        writeJsonLine(res, {
+          type: "meta",
+          mood: detectedMood,
+          ragUsed,
+          cached: false,
+          knowledgeMode,
+          timings: buildTimingPayload(tracker, {
+            ragUsed,
+            knowledgeMode,
+            chatModel,
+            embedModel,
+            cachePrompt: chatOptions.cache_prompt,
+          }),
+        });
+      }
+
+      const { sentences, consumedLength: nextConsumedLength } =
+        collectCompletedSentences(replyParts.text, consumedLength);
+
+      consumedLength = nextConsumedLength;
+
+      for (const sentence of sentences) {
+        spokenSentences.push(sentence);
+        const replyText = spokenSentences.join(" ");
+        writeJsonLine(res, {
+          type: "sentence",
+          text: sentence,
+          mood: detectedMood || "THINKING",
+          reply: `[${detectedMood || "THINKING"}] ${replyText}`,
+          replyText,
+          cached: false,
+        });
+      }
+    }
+
+    if (chunk.done) {
+      tracker.mark("llmDoneMs");
+      break;
+    }
+  }
+
+  const replyParts = parseReplyParts(rawReply);
+  if (!detectedMood) {
+    detectedMood = replyParts.mood || "THINKING";
+    if (!metaSent) {
+      writeJsonLine(res, {
+        type: "meta",
+        mood: detectedMood,
+        ragUsed,
+        cached: false,
+        knowledgeMode,
+        timings: buildTimingPayload(tracker, {
+          ragUsed,
+          knowledgeMode,
+          chatModel,
+          embedModel,
+          cachePrompt: chatOptions.cache_prompt,
+        }),
+      });
+    }
+  }
+
+  const trailingSentence = finalizeTrailingSentence(
+    replyParts.text,
+    consumedLength,
+  );
+  if (trailingSentence) {
+    spokenSentences.push(trailingSentence);
+    const replyText = spokenSentences.join(" ");
+    writeJsonLine(res, {
+      type: "sentence",
+      text: trailingSentence,
+      mood: detectedMood,
+      reply: `[${detectedMood}] ${replyText}`,
+      replyText,
+      cached: false,
+    });
+  }
+
+  const payload = {
+    ...normalizeRobotReply(rawReply),
+    context: buildContextPayload(contextMatches),
+    ragUsed,
+    knowledgeMode,
+    chatModel,
+    embedModel,
+  };
+
+  responseCache.set(cacheKey, payload);
+  trimCache(responseCache, 200);
+
+  writeJsonLine(res, {
+    type: "done",
+    ...payload,
+    cached: false,
+    timings: buildTimingPayload(tracker, {
+      ragUsed,
+      knowledgeMode,
+      chatModel,
+      embedModel,
+      cachePrompt: chatOptions.cache_prompt,
+    }),
+  });
+  res.end();
+  tracker.log({
+    cached: false,
+    ragUsed,
+    knowledgeMode,
+    chatModel,
+    embedModel,
+    cachePrompt: chatOptions.cache_prompt,
+  });
+}
+
 export default async function handler(req, res) {
   const tracker = createTimingTracker("chat-stream");
 
@@ -264,6 +487,7 @@ export default async function handler(req, res) {
   }
 
   const text = String(req.body?.text || "").trim();
+  const knowledgeMode = normalizeKnowledgeMode(req.body?.knowledgeMode);
   tracker.mark("requestParsedMs");
 
   if (!text) {
@@ -278,22 +502,43 @@ export default async function handler(req, res) {
   });
 
   try {
-    const store = await loadEmbeddingStore();
-    tracker.mark("storeLoadedMs");
+    let sourceVersion = "none";
+    let knowledgeText = "";
+    let store = null;
 
-    const cacheKey = normalizeCacheKey(text, store);
+    if (knowledgeMode === KNOWLEDGE_MODE_RAW) {
+      const knowledgeDocument = await loadKnowledgeDocument();
+      tracker.mark("knowledgeLoadedMs");
+      knowledgeText = String(knowledgeDocument.text || "").trim();
+      sourceVersion = `knowledge-${knowledgeDocument.mtimeMs || "missing"}`;
+    } else {
+      store = await loadEmbeddingStore();
+      tracker.mark("storeLoadedMs");
+      sourceVersion = `embeddings-${store.createdAt || "no-store"}`;
+    }
+
+    const cacheKey = buildCacheKey({
+      text,
+      knowledgeMode,
+      sourceVersion,
+    });
     const cachedResponse = responseCache.get(cacheKey);
-    if (cachedResponse) {
-      if (!cachedResponse.ragUsed) {
-        responseCache.delete(cacheKey);
-      } else {
+    const canServeCachedResponse =
+      cachedResponse &&
+      (
+        cachedResponse.ragUsed ||
+        cachedResponse.knowledgeMode === KNOWLEDGE_MODE_RAW
+      );
+
+    if (canServeCachedResponse) {
       const sentences = cachedResponse.text
         .split(/(?<=[.!?])\s+/)
         .map((sentence) => sentence.trim())
         .filter(Boolean);
-      const timingPayload = tracker.snapshot({
+      const timingPayload = buildTimingPayload(tracker, {
         cached: true,
         ragUsed: cachedResponse.ragUsed,
+        knowledgeMode: cachedResponse.knowledgeMode || knowledgeMode,
         chatModel: cachedResponse.chatModel || null,
         embedModel: cachedResponse.embedModel || null,
       });
@@ -303,6 +548,7 @@ export default async function handler(req, res) {
         mood: cachedResponse.mood,
         ragUsed: cachedResponse.ragUsed,
         cached: true,
+        knowledgeMode: cachedResponse.knowledgeMode || knowledgeMode,
         timings: timingPayload,
       });
 
@@ -323,22 +569,85 @@ export default async function handler(req, res) {
         type: "done",
         ...cachedResponse,
         cached: true,
-        timings: tracker.snapshot({
-          cached: true,
-          ragUsed: cachedResponse.ragUsed,
-          chatModel: cachedResponse.chatModel || null,
-          embedModel: cachedResponse.embedModel || null,
-        }),
+        timings: timingPayload,
       });
       res.end();
       tracker.log({
         cached: true,
         ragUsed: cachedResponse.ragUsed,
+        knowledgeMode: cachedResponse.knowledgeMode || knowledgeMode,
         chatModel: cachedResponse.chatModel || null,
         embedModel: cachedResponse.embedModel || null,
       });
       return;
+    }
+
+    if (knowledgeMode === KNOWLEDGE_MODE_RAW) {
+      if (!knowledgeText) {
+        const noKnowledgePayload = {
+          ...buildKnowledgeUnavailableReply(knowledgeMode),
+          context: [],
+          ragUsed: false,
+          knowledgeMode,
+          chatModel: null,
+          embedModel: null,
+        };
+
+        writeJsonLine(res, {
+          type: "meta",
+          mood: noKnowledgePayload.mood,
+          ragUsed: false,
+          cached: false,
+          knowledgeMode,
+          timings: buildTimingPayload(tracker, {
+            ragUsed: false,
+            knowledgeMode,
+            chatModel: null,
+            embedModel: null,
+          }),
+        });
+        writeJsonLine(res, {
+          type: "sentence",
+          text: noKnowledgePayload.text,
+          mood: noKnowledgePayload.mood,
+          reply: noKnowledgePayload.reply,
+          replyText: noKnowledgePayload.text,
+          cached: false,
+        });
+        writeJsonLine(res, {
+          type: "done",
+          ...noKnowledgePayload,
+          cached: false,
+          timings: buildTimingPayload(tracker, {
+            ragUsed: false,
+            knowledgeMode,
+            chatModel: null,
+            embedModel: null,
+          }),
+        });
+        res.end();
+        tracker.log({
+          cached: false,
+          ragUsed: false,
+          knowledgeMode,
+          chatModel: null,
+          embedModel: null,
+          reason: "empty-knowledge",
+        });
+        return;
       }
+
+      await streamReply({
+        res,
+        tracker,
+        text,
+        knowledgeMode,
+        knowledgeText,
+        contextMatches: [],
+        embedModel: null,
+        cacheKey,
+      });
+      return;
     }
 
     let contextMatches = [];
@@ -361,6 +670,7 @@ export default async function handler(req, res) {
             ...buildStaleEmbeddingsReply(),
             context: [],
             ragUsed: false,
+            knowledgeMode,
             chatModel: null,
             embedModel,
           };
@@ -370,8 +680,10 @@ export default async function handler(req, res) {
             mood: stalePayload.mood,
             ragUsed: false,
             cached: false,
-            timings: tracker.snapshot({
+            knowledgeMode,
+            timings: buildTimingPayload(tracker, {
               ragUsed: false,
+              knowledgeMode,
               chatModel: null,
               embedModel,
             }),
@@ -388,8 +700,9 @@ export default async function handler(req, res) {
             type: "done",
             ...stalePayload,
             cached: false,
-            timings: tracker.snapshot({
+            timings: buildTimingPayload(tracker, {
               ragUsed: false,
+              knowledgeMode,
               chatModel: null,
               embedModel,
             }),
@@ -398,6 +711,7 @@ export default async function handler(req, res) {
           tracker.log({
             cached: false,
             ragUsed: false,
+            knowledgeMode,
             chatModel: null,
             embedModel,
             reason: "stale-embeddings",
@@ -426,13 +740,15 @@ export default async function handler(req, res) {
       writeJsonLine(res, {
         type: "error",
         error: "llama.cpp unavailable",
-        timings: tracker.snapshot({
+        timings: buildTimingPayload(tracker, {
+          knowledgeMode,
           embedModel,
         }),
       });
       res.end();
       tracker.log({
         error: "llama.cpp unavailable",
+        knowledgeMode,
         embedModel,
       });
       return;
@@ -456,9 +772,10 @@ export default async function handler(req, res) {
 
     if (!ragConfidenceOk) {
       const noRagPayload = {
-        ...buildNoRagReply(store),
+        ...buildKnowledgeUnavailableReply(knowledgeMode, store),
         context: [],
         ragUsed: false,
+        knowledgeMode,
         chatModel: null,
         embedModel,
       };
@@ -468,8 +785,10 @@ export default async function handler(req, res) {
         mood: noRagPayload.mood,
         ragUsed: false,
         cached: false,
-        timings: tracker.snapshot({
+        knowledgeMode,
+        timings: buildTimingPayload(tracker, {
           ragUsed: false,
+          knowledgeMode,
           chatModel: null,
           embedModel,
         }),
@@ -486,8 +805,9 @@ export default async function handler(req, res) {
         type: "done",
         ...noRagPayload,
         cached: false,
-        timings: tracker.snapshot({
+        timings: buildTimingPayload(tracker, {
           ragUsed: false,
+          knowledgeMode,
           chatModel: null,
           embedModel,
         }),
@@ -496,159 +816,33 @@ export default async function handler(req, res) {
       tracker.log({
         cached: false,
         ragUsed: false,
+        knowledgeMode,
         chatModel: null,
         embedModel,
       });
       return;
     }
 
-    const chatModel = await resolveChatModel(CHAT_MODEL_OVERRIDE);
-    tracker.mark("chatModelResolvedMs");
-
-    let rawReply = "";
-    let consumedLength = 0;
-    let detectedMood = null;
-    let metaSent = false;
-    let firstTokenSeen = false;
-    const spokenSentences = [];
-
-    for await (const chunk of generateTextStream({
-      model: chatModel,
-      system: createSystemPrompt(),
-      prompt: buildPrompt(text, contextMatches),
-      keepAlive: MODEL_KEEP_ALIVE,
-      options: {
-        temperature: 0.1,
-        num_predict: 140,
-        num_ctx: 1024,
-      },
-    })) {
-      if (chunk.response) {
-        rawReply += chunk.response;
-
-        if (!firstTokenSeen) {
-          firstTokenSeen = true;
-          tracker.mark("llmFirstChunkMs");
-        }
-
-        const replyParts = parseReplyParts(rawReply);
-        if (!detectedMood && replyParts.mood) {
-          detectedMood = replyParts.mood;
-        }
-
-        if (!metaSent && detectedMood) {
-          metaSent = true;
-          writeJsonLine(res, {
-            type: "meta",
-            mood: detectedMood,
-            ragUsed: true,
-            cached: false,
-            timings: tracker.snapshot({
-              ragUsed: true,
-              chatModel,
-              embedModel,
-            }),
-          });
-        }
-
-        const { sentences, consumedLength: nextConsumedLength } =
-          collectCompletedSentences(replyParts.text, consumedLength);
-
-        consumedLength = nextConsumedLength;
-
-        for (const sentence of sentences) {
-          spokenSentences.push(sentence);
-          const replyText = spokenSentences.join(" ");
-          writeJsonLine(res, {
-            type: "sentence",
-            text: sentence,
-            mood: detectedMood || "THINKING",
-            reply: `[${detectedMood || "THINKING"}] ${replyText}`,
-            replyText,
-            cached: false,
-          });
-        }
-      }
-
-      if (chunk.done) {
-        tracker.mark("llmDoneMs");
-        break;
-      }
-    }
-
-    const replyParts = parseReplyParts(rawReply);
-    if (!detectedMood) {
-      detectedMood = replyParts.mood || "THINKING";
-      if (!metaSent) {
-        writeJsonLine(res, {
-          type: "meta",
-          mood: detectedMood,
-          ragUsed: true,
-          cached: false,
-          timings: tracker.snapshot({
-            ragUsed: true,
-            chatModel,
-            embedModel,
-          }),
-        });
-      }
-    }
-
-    const trailingSentence = finalizeTrailingSentence(
-      replyParts.text,
-      consumedLength,
-    );
-    if (trailingSentence) {
-      spokenSentences.push(trailingSentence);
-      const replyText = spokenSentences.join(" ");
-      writeJsonLine(res, {
-        type: "sentence",
-        text: trailingSentence,
-        mood: detectedMood,
-        reply: `[${detectedMood}] ${replyText}`,
-        replyText,
-        cached: false,
-      });
-    }
-
-    const payload = {
-      ...normalizeRobotReply(rawReply),
-      context: buildContextPayload(contextMatches),
-      ragUsed: true,
-      chatModel,
+    await streamReply({
+      res,
+      tracker,
+      text,
+      knowledgeMode,
+      knowledgeText: "",
+      contextMatches,
       embedModel,
-    };
-
-    responseCache.set(cacheKey, payload);
-    trimCache(responseCache, 200);
-
-    writeJsonLine(res, {
-      type: "done",
-      ...payload,
-      cached: false,
-      timings: tracker.snapshot({
-        ragUsed: true,
-        chatModel,
-        embedModel,
-      }),
-    });
-    res.end();
-    tracker.log({
-      cached: false,
-      ragUsed: true,
-      chatModel,
-      embedModel,
-      sentences: spokenSentences.length,
+      cacheKey,
     });
   } catch (error) {
     tracker.log({
-      error: error.message || "Chat streaming failed",
+      error: error.message || "llama.cpp unavailable",
+      knowledgeMode,
     });
-    writeJsonLine(res, {
-      type: "error",
-      error: error.message || "Chat streaming failed",
-      timings: tracker.snapshot(),
+    res.status(500).json({
+      error: error.message || "llama.cpp unavailable",
+      timings: buildTimingPayload(tracker, {
+        knowledgeMode,
+      }),
     });
-    res.end();
   }
 }

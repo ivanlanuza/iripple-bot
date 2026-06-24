@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { KNOWLEDGE_MODE_RAW } from "@/lib/knowledge-mode";
+
 const REST_FACE_MOTION = {
   eyeX: 0,
   eyeY: 0,
@@ -933,9 +935,11 @@ export default function RobotFace({
   error,
   mouthMotion,
   faceStyle,
+  knowledgeMode,
   useFillerSpeech,
   onToggleFaceStyle,
   onToggleFillerSpeech,
+  onToggleKnowledgeMode,
 }) {
   const expression = getFaceExpression({ mood, stage, reply, transcript });
   const { blinkLevel, motion } = useFaceMotion(stage);
@@ -1022,6 +1026,9 @@ export default function RobotFace({
                 <span className="rounded-full border border-[#4c7768]/18 bg-[#effbf5]/58 px-3 py-2">
                   {faceStyle === "pixelized" ? "Pixelized Face" : "Rounded Face"}
                 </span>
+                <span className="rounded-full border border-[#4c7768]/18 bg-[#effbf5]/58 px-3 py-2">
+                  {knowledgeMode === KNOWLEDGE_MODE_RAW ? "Raw Knowledge" : "RAG Knowledge"}
+                </span>
               </div>
               <button
                 type="button"
@@ -1045,8 +1052,19 @@ export default function RobotFace({
               >
                 Filler Phrase {useFillerSpeech ? "On" : "Off"}
               </button>
+              <button
+                type="button"
+                onClick={onToggleKnowledgeMode}
+                className={`pointer-events-auto rounded-2xl border px-4 py-3 text-[0.68rem] font-semibold tracking-[0.26em] transition ${
+                  knowledgeMode === KNOWLEDGE_MODE_RAW
+                    ? "border-[#325b4d] bg-[#dff6eb] text-[#17342c]"
+                    : "border-[#4c7768]/18 bg-[#effbf5]/58 text-[#4b7868]"
+                }`}
+              >
+                Knowledge {knowledgeMode === KNOWLEDGE_MODE_RAW ? "Raw" : "RAG"}
+              </button>
               <span className="text-center text-[0.6rem] tracking-[0.22em] text-[#4b7868]/70">
-                Default: off
+                Defaults: filler off, knowledge RAG
               </span>
             </div>
           </div>
