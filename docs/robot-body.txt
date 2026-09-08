@@ -1,0 +1,35 @@
+Help me create a 3d render that I can use to give to a modeler of a 3d printing shop.
+I am trying to create an AI-powered voice assistant - but I want it to look like a robot with a face (a 10" display monitor)
+It will be powered by a Mac mini M1 16GB.  I will connect a directional mic to capture voice questions and speakers to playback the answers
+The robot will have a push to talk button attached to it.  An external button, when pressed, triggers the software to capture audio.
+
+The shape starts as a simple rectangular cube.
+Dimensions: width: 12 inches, height 20 inches, depth 8 inches
+Color: Teal
+Corners are rounded.
+
+The back panel can be detached so that I can put the components inside.  
+The back panel should also have a hole where the Mac mini power supply cord can be slotted through.
+
+The front panel:
+- at the top, there should be a hole so that a 10" x 7" lcd monitor can be shown (monitor inside the chassis)
+- below the monitor are grille holes so that the directional mic can listen to questions from the front
+- the bottom part will just have text that says "RiRi"
+
+The side panel:
+- should have grill holes also for the speakers to be heard from
+
+Inside the chassis:
+- the Mac mini will be placed flat at the bottom
+- above it is a layer where the speakers will be placed in
+- above it is another layer where the directional mic will be placed
+- then the space to mount the monitor
+
+To complete the robot, put cute chubby arms on the side, and feet in front as if the robot is sitting.
+
+Put the robot in a solid base so it is stable. And as if the robot is sitting on the base.
+In the front of the base, there will be a big black push button for push to talk.  Size of button is 2" x 2" - with height of 1 inch.
+
+Use the attached image for the robot face to be displayed in the monitor.
+
+Ask me questions if things are not clear.  If OK, proceed with rendering.

@@ -1,6 +1,4 @@
 import {
-  FACE_LIGHT,
-  FACE_MID,
   HEART_FILL,
   HEART_STROKE,
   MOUTH_DARK,
@@ -8,6 +6,35 @@ import {
   MOUTH_TONGUE,
   OUTLINE_COLOR,
 } from "@/components/robot-face/constants";
+
+function ThinkingIndicator({ isThinking }) {
+  if (!isThinking) {
+    return null;
+  }
+
+  return (
+    <g aria-hidden="true" fill="white" opacity="0.58">
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 180 57"
+          to="360 180 57"
+          dur="1.25s"
+          repeatCount="indefinite"
+        />
+        <circle cx="180" cy="42" r="2.7" />
+        <circle cx="191" cy="47" r="2.7" />
+        <circle cx="195" cy="57" r="2.7" />
+        <circle cx="191" cy="68" r="2.7" />
+        <circle cx="180" cy="72" r="2.7" />
+        <circle cx="169" cy="68" r="2.7" />
+        <circle cx="165" cy="57" r="2.7" />
+        <circle cx="169" cy="47" r="2.7" />
+      </g>
+    </g>
+  );
+}
 
 function HeartEye({ x, y, transform }) {
   return (
@@ -17,6 +44,19 @@ function HeartEye({ x, y, transform }) {
       stroke={HEART_STROKE}
       strokeWidth="3"
       strokeLinejoin="round"
+      transform={transform}
+    />
+  );
+}
+
+function SparkleEye({ x, transform }) {
+  return (
+    <path
+      d={`M${x} 88 V114 M${x - 10} 101 H${x + 10} M${x - 6} 94 L${x + 6} 108 M${x + 6} 94 L${x - 6} 108`}
+      fill="none"
+      stroke={OUTLINE_COLOR}
+      strokeWidth="3.5"
+      strokeLinecap="round"
       transform={transform}
     />
   );
@@ -54,6 +94,19 @@ function Eye({ expression, side, blinkLevel, motion }) {
 
   if (expression === "heartEyes") {
     return <HeartEye x={x} y={94} transform={transform} />;
+  }
+
+  if (expression === "sparkle") {
+    return <SparkleEye x={x} transform={transform} />;
+  }
+
+  if (expression === "kawaii") {
+    return (
+      <g transform={transform}>
+        <circle cx={x} cy="108" r="8" fill={OUTLINE_COLOR} />
+        <circle cx={x + 2.5} cy="105.5" r="2.25" fill="white" />
+      </g>
+    );
   }
 
   return <circle cx={x} cy="108" r="7.5" fill={OUTLINE_COLOR} transform={transform} />;
@@ -287,7 +340,7 @@ function FrownMouth({ expression, mouthMotion, stage }) {
 }
 
 function Mouth({ expression, stage, mouthMotion }) {
-  if (expression === "happy" || expression === "heartEyes") {
+  if (["happy", "heartEyes", "kawaii", "sparkle"].includes(expression)) {
     return <HappyMouth mouthMotion={mouthMotion} />;
   }
 
@@ -306,45 +359,48 @@ function Mouth({ expression, stage, mouthMotion }) {
   return <FrownMouth expression={expression} mouthMotion={mouthMotion} stage={stage} />;
 }
 
+function CuteCheeks({ expression }) {
+  if (!["heartEyes", "kawaii", "sparkle"].includes(expression)) {
+    return null;
+  }
+
+  return (
+    <g fill={HEART_FILL} opacity="0.45">
+      <ellipse cx="75" cy="140" rx="13" ry="5" />
+      <ellipse cx="285" cy="140" rx="13" ry="5" />
+    </g>
+  );
+}
+
 export function RoundedFaceScreen({
   stage,
   mouthMotion,
   expression,
   blinkLevel,
   motion,
+  isThinking,
 }) {
   return (
-    <div className="rounded-[2.4rem] border border-[#2f5d50]/20 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.36),rgba(255,255,255,0.04)_52%,transparent_72%)] p-5 shadow-[0_30px_70px_rgba(25,54,46,0.22)]">
-      <svg viewBox="0 0 360 250" className="h-[24rem] w-full sm:h-[29rem]" role="img" aria-hidden="true">
-        <defs>
-          <linearGradient id="rounded-face-fill" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={FACE_LIGHT} />
-            <stop offset="55%" stopColor={FACE_MID} />
-            <stop offset="100%" stopColor={FACE_LIGHT} />
-          </linearGradient>
-          <radialGradient id="rounded-face-glow" cx="50%" cy="42%" r="72%">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.38)" />
-            <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-          </radialGradient>
-        </defs>
-
+    <div className="rounded-[2.4rem] p-5">
+      <svg viewBox="0 0 360 250" className="h-[33.6rem] w-full sm:h-[40.6rem]" role="img" aria-hidden="true">
         <rect
-          x="20"
-          y="20"
-          width="320"
-          height="200"
+          x="4"
+          y="5"
+          width="352"
+          height="240"
           rx="28"
-          fill="url(#rounded-face-fill)"
-          stroke={OUTLINE_COLOR}
-          strokeWidth="4.5"
+          fill="transparent"
         />
-        <rect x="20" y="20" width="320" height="200" rx="28" fill="url(#rounded-face-glow)" />
 
-        <Brow expression={expression} side="left" motion={motion} />
-        <Brow expression={expression} side="right" motion={motion} />
-        <Eye expression={expression} side="left" blinkLevel={blinkLevel} motion={motion} />
-        <Eye expression={expression} side="right" blinkLevel={blinkLevel} motion={motion} />
-        <Mouth expression={expression} stage={stage} mouthMotion={mouthMotion} />
+        <g transform="translate(180 125) scale(1.32 1.56) translate(-180 -120)">
+          <ThinkingIndicator isThinking={isThinking} />
+          <Brow expression={expression} side="left" motion={motion} />
+          <Brow expression={expression} side="right" motion={motion} />
+          <Eye expression={expression} side="left" blinkLevel={blinkLevel} motion={motion} />
+          <Eye expression={expression} side="right" blinkLevel={blinkLevel} motion={motion} />
+          <CuteCheeks expression={expression} />
+          <Mouth expression={expression} stage={stage} mouthMotion={mouthMotion} />
+        </g>
       </svg>
     </div>
   );

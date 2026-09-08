@@ -15,5 +15,5 @@ export const HEART_FILL = "#f1738a";
 export const HEART_STROKE = "#b92d4c";
 export const PIXEL_SIZE = 9;
 export const PIXEL_GAP = 1;
-export const IDLE_EXPRESSIONS = ["happy", "curious", "heartEyes"];
+export const IDLE_EXPRESSIONS = ["happy", "curious", "heartEyes", "kawaii", "sparkle"];
 export const IRRELEVANT_STREAK_THRESHOLD = 2;

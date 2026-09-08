@@ -1,5 +1,4 @@
 import {
-  FACE_LIGHT,
   HEART_FILL,
   MOUTH_DARK,
   MOUTH_LIGHT,
@@ -8,6 +7,35 @@ import {
   PIXEL_GAP,
   PIXEL_SIZE,
 } from "@/components/robot-face/constants";
+
+function PixelThinkingIndicator({ isThinking }) {
+  if (!isThinking) {
+    return null;
+  }
+
+  return (
+    <g aria-hidden="true" fill="white" opacity="0.58" shapeRendering="geometricPrecision">
+      <g>
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 180 57"
+          to="360 180 57"
+          dur="1.25s"
+          repeatCount="indefinite"
+        />
+        <circle cx="180" cy="42" r="2.7" />
+        <circle cx="191" cy="47" r="2.7" />
+        <circle cx="195" cy="57" r="2.7" />
+        <circle cx="191" cy="68" r="2.7" />
+        <circle cx="180" cy="72" r="2.7" />
+        <circle cx="169" cy="68" r="2.7" />
+        <circle cx="165" cy="57" r="2.7" />
+        <circle cx="169" cy="47" r="2.7" />
+      </g>
+    </g>
+  );
+}
 
 function PixelBlocks({ blocks, fill = OUTLINE_COLOR, opacity = 1, transform }) {
   return blocks.flatMap((block, index) => {
@@ -54,6 +82,17 @@ function getPixelEyeBlocks(expression, side, blinkLevel) {
       { x: x + 9, y: 97, w: 18, h: 9, fill: HEART_FILL },
       { x: x + 18, y: 106, w: 9, h: 9, fill: HEART_FILL },
     ];
+  }
+
+  if (expression === "sparkle") {
+    return [
+      { x: x + 9, y: 90, w: 9, h: 27 },
+      { x, y: 99, w: 27, h: 9 },
+    ];
+  }
+
+  if (expression === "kawaii") {
+    return [{ x: x + 6, y: 96, w: 15, h: 15 }];
   }
 
   return [{ x: x + 9, y: 99, w: 9, h: 9 }];
@@ -217,7 +256,7 @@ function getPixelFrownBlocks(expression, mouthMotion, stage) {
 }
 
 function getPixelMouthBlocks(expression, stage, mouthMotion) {
-  if (expression === "happy" || expression === "heartEyes") {
+  if (["happy", "heartEyes", "kawaii", "sparkle"].includes(expression)) {
     return getPixelHappyMouthBlocks(mouthMotion);
   }
 
@@ -236,12 +275,24 @@ function getPixelMouthBlocks(expression, stage, mouthMotion) {
   return getPixelFrownBlocks(expression, mouthMotion, stage);
 }
 
+function getPixelCheekBlocks(expression) {
+  if (!["heartEyes", "kawaii", "sparkle"].includes(expression)) {
+    return [];
+  }
+
+  return [
+    { x: 63, y: 135, w: 27, h: 9, fill: HEART_FILL, opacity: 0.5 },
+    { x: 270, y: 135, w: 27, h: 9, fill: HEART_FILL, opacity: 0.5 },
+  ];
+}
+
 export function PixelFaceScreen({
   stage,
   mouthMotion,
   expression,
   blinkLevel,
   motion,
+  isThinking,
 }) {
   const leftEyeTransform = `translate(${Math.round((motion.eyeX - 1) / 3) * 3} ${Math.round(motion.eyeY / 3) * 3})`;
   const rightEyeTransform = `translate(${Math.round((motion.eyeX + 1) / 3) * 3} ${Math.round(motion.eyeY / 3) * 3})`;
@@ -249,30 +300,32 @@ export function PixelFaceScreen({
   const rightBrowTransform = `translate(0 ${Math.round(motion.browLift / 4) * 4})`;
 
   return (
-    <div className="rounded-[1.8rem] border border-[#6c6c6c]/28 bg-[#d3d8d2] p-5 shadow-[0_30px_70px_rgba(50,50,50,0.18)]">
+    <div className="rounded-[1.8rem] p-5">
       <svg
         viewBox="0 0 360 250"
-        className="h-[24rem] w-full sm:h-[29rem]"
+        className="h-[33.6rem] w-full sm:h-[40.6rem]"
         role="img"
         aria-hidden="true"
         shapeRendering="crispEdges"
       >
         <rect
-          x="20"
-          y="20"
-          width="320"
-          height="200"
+          x="4"
+          y="5"
+          width="352"
+          height="240"
           rx="24"
-          fill={FACE_LIGHT}
-          stroke="#262626"
-          strokeWidth="5"
+          fill="transparent"
         />
 
-        <PixelBlocks blocks={getPixelBrowBlocks(expression, "left")} transform={leftBrowTransform} />
-        <PixelBlocks blocks={getPixelBrowBlocks(expression, "right")} transform={rightBrowTransform} />
-        <PixelBlocks blocks={getPixelEyeBlocks(expression, "left", blinkLevel)} transform={leftEyeTransform} />
-        <PixelBlocks blocks={getPixelEyeBlocks(expression, "right", blinkLevel)} transform={rightEyeTransform} />
-        <PixelBlocks blocks={getPixelMouthBlocks(expression, stage, mouthMotion)} />
+        <g transform="translate(180 125) scale(1.32 1.56) translate(-180 -120)">
+          <PixelThinkingIndicator isThinking={isThinking} />
+          <PixelBlocks blocks={getPixelBrowBlocks(expression, "left")} transform={leftBrowTransform} />
+          <PixelBlocks blocks={getPixelBrowBlocks(expression, "right")} transform={rightBrowTransform} />
+          <PixelBlocks blocks={getPixelEyeBlocks(expression, "left", blinkLevel)} transform={leftEyeTransform} />
+          <PixelBlocks blocks={getPixelEyeBlocks(expression, "right", blinkLevel)} transform={rightEyeTransform} />
+          <PixelBlocks blocks={getPixelCheekBlocks(expression)} />
+          <PixelBlocks blocks={getPixelMouthBlocks(expression, stage, mouthMotion)} />
+        </g>
       </svg>
     </div>
   );

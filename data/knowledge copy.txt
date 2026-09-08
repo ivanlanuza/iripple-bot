@@ -1,0 +1,277 @@
+Frequently Asked Questions:
+Q: Who are you?
+A: I am RIRI!  iRipple's friendly bot.  I am here to answer your questions - or point you to one of our helpful employees.
+
+Q: What can you do?
+A: I can answer questions about iRipple, our products, and the retail industry that we serve.
+
+Q: Why should I believe you?
+A: Why should you believe me?  Because a good-looking person like you  knows when someone's real.  No Cap!
+
+======
+
+iRipple (pronounced as Eye-Ripple) Overview
+
+Company Summary
+
+iRipple  is a Philippine retail technology company that provides an integrated retail operating platform for retailers. The platform combines point-of-sale (POS), retail management, inventory control, customer loyalty, business intelligence, and AI-powered retail analytics into a single ecosystem. iRipple has over 25 years of experience serving the retail industry and supports more than 400 retail brands, over 4,000 stores, and more than 1 million daily retail transactions.  
+
+The company’s mission is:
+
+Lead retailers to greatness through technology.
+
+Its vision is:
+
+Retailers can scale up and speed up using iRipple technology.  
+
+⸻
+
+Core Value Proposition
+
+iRipple helps retailers improve daily store operations by addressing common retail challenges such as:
+
+* Slow checkout processes
+* Inventory inaccuracies
+* Stockouts and overstocking
+* POS fraud and shrinkage
+* Multi-store operational complexity
+* Lack of business visibility
+* Retail expansion challenges
+
+The platform is designed to provide:
+
+* Faster checkout
+* Better inventory control
+* Centralized retail operations
+* Improved business visibility
+* AI-assisted decision making
+* Fraud and loss prevention
+* Scalable multi-store management
+
+The company’s operating philosophy is summarized as:
+
+Have Better Store Days.  
+
+⸻
+
+iRipple Platform
+
+The iRipple platform consists of interconnected retail solutions that operate on shared retail data.
+
+Platform workflow:
+
+1. POS
+2. Inventory & Purchasing
+3. Business Intelligence
+4. Customer Loyalty
+5. Concessionaire Management
+6. Retail AI
+7. POS Fraud Detection
+
+This architecture enables operational visibility from the checkout counter to executive management.  
+
+⸻
+
+Products
+
+Barter POS
+
+Barter POS is iRipple’s enterprise point-of-sale system.
+
+Purpose
+
+Provides fast and reliable checkout operations for retail stores.
+
+Key Capabilities
+
+* Barcode, SKU, and product lookup
+* Multiple payment methods
+* Cash, card, e-wallet, and store credit support
+* Split payment processing
+* Promotion and discount engine
+* Returns and exchanges management
+* Offline transaction processing
+* End-of-day reporting
+* Cash reconciliation
+* Automatic synchronization after connectivity restoration
+
+Business Benefits
+
+* Faster checkout throughput
+* Reduced cashier errors
+* Improved customer experience
+* Continuous operations during internet outages
+
+Typical use cases include supermarkets, department stores, hardware stores, specialty retail, and multi-branch retail operations.  
+
+⸻
+
+Barter RMS (Retail Management System)
+
+Barter RMS is a centralized retail management platform for multi-store operations.
+
+Purpose
+
+Provides head-office control over inventory, pricing, purchasing, promotions, and operational governance.
+
+Key Capabilities
+
+* Centralized inventory management
+* Real-time stock monitoring
+* Reorder point management
+* Price management
+* Supplier management
+* Purchase order management
+* Store-to-store transfers
+* Promotion planning
+* User role and access management
+
+Business Benefits
+
+* Improved inventory accuracy
+* Better purchasing control
+* Consistent pricing across stores
+* Standardized operations across branches
+
+Barter RMS is intended for retailers operating multiple stores that require centralized governance and operational control.  
+
+⸻
+
+Barter Loyalty
+
+Barter Loyalty is a customer loyalty and retention platform.
+
+Purpose
+
+Helps retailers build customer loyalty and increase repeat purchases.
+
+Core Functions
+
+* Customer rewards programs
+* Loyalty tracking
+* Customer behavior analysis
+* Personalized promotions
+* Retention management
+
+Business Benefits
+
+* Increased repeat purchases
+* Stronger customer relationships
+* Better customer segmentation
+* Improved campaign effectiveness
+
+The platform connects loyalty behavior with store and category performance metrics.  
+
+⸻
+
+Atlas Mobile Inventory App
+
+Atlas is a mobile inventory management application.
+
+Purpose
+
+Enables inventory operations directly from the stockroom floor using mobile devices.
+
+Key Capabilities
+
+* Barcode scanning
+* Product lookup
+* Receiving and put-away processing
+* Cycle counts
+* Stock adjustments
+* Transfer processing
+* Offline operation
+
+Business Benefits
+
+* Improved inventory accuracy
+* Faster stockroom operations
+* Reduced dependence on desktop workstations
+* Real-time inventory updates
+
+Atlas supports inventory receiving, stock transfers, cycle counting, and reconciliation activities.  
+
+⸻
+
+Retina Business Intelligence
+
+Retina BI is iRipple’s business intelligence platform.
+
+Purpose
+
+Transforms retail transaction data into operational and executive insights.
+
+Key Capabilities
+
+* Real-time sales dashboards
+* Inventory analytics
+* Customer behavior analysis
+* Store performance comparison
+* Custom report generation
+* Profitability analysis
+
+Business Benefits
+
+* Faster decision making
+* Better inventory optimization
+* Improved sales visibility
+* Enhanced operational performance monitoring
+
+Retina BI enables analysis across products, stores, categories, and customer segments.  
+
+⸻
+
+Retina POS Fraud Console
+
+Retina POS Fraud Console is an AI-powered retail loss prevention solution.
+
+Purpose
+
+Detects suspicious transaction activity and potential fraud.
+
+Monitored Behaviors
+
+* Excessive voids
+* Unusual refunds
+* Discount abuse
+* Cashier anomalies
+* Transaction exceptions
+
+Business Benefits
+
+* Reduced shrinkage
+* Earlier fraud detection
+* Improved audit visibility
+* Better transaction governance
+
+The system continuously analyzes POS transactions and highlights high-risk activities requiring management attention.  
+
+⸻
+
+Retina AI Analyst
+
+Retina AI Analyst is an AI-powered retail decision support system.
+
+Purpose
+
+Acts as a conversational retail analyst trained on operational and transactional retail data.
+
+Example Questions
+
+* Why are sales down this week?
+* Which stores are underperforming?
+* What products are frequently out of stock?
+* Which cashiers show unusual transaction behavior?
+
+Business Benefits
+
+* Faster executive decision making
+* Improved operational visibility
+* Easier access to retail insights
+* AI-assisted analysis of business performance
+
+The system is designed to help retail operators identify issues and opportunities using natural language interaction.  
+
+Short Description
+
+iRipple is a Philippine retail technology company that provides an integrated retail operating system combining POS, retail management, inventory control, loyalty, business intelligence, and AI-powered analytics. The platform helps retailers improve checkout speed, inventory accuracy, fraud prevention, operational visibility, and multi-store management while supporting growth and scalability across retail formats.  

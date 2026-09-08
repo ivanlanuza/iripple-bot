@@ -18,7 +18,6 @@ export default function RobotFace({
   mood,
   transcript,
   reply,
-  timings,
   stage,
   error,
   mouthMotion,
@@ -50,7 +49,7 @@ export default function RobotFace({
   }[stage];
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_top,#d6efe3_0%,#9ecbb9_35%,#5f8f7f_100%)] px-4 py-8 text-[#1a2f29]">
+    <main className="relative flex min-h-screen items-start justify-center overflow-hidden bg-[radial-gradient(circle_at_top,#d6efe3_0%,#9ecbb9_35%,#5f8f7f_100%)] px-4 pb-8 pt-[5vh] text-[#1a2f29]">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,255,255,0.38),transparent_34%)]" />
       <div className="scanlines pointer-events-none absolute inset-0 opacity-20" />
 
@@ -58,7 +57,7 @@ export default function RobotFace({
         <span>iripple-robot</span>
       </div>
 
-      <section className="relative z-10 flex w-full max-w-3xl items-center justify-center">
+      <section className="relative z-10 flex w-full max-w-[61.425rem] translate-x-[4%] items-center justify-center">
         <div className="w-full">
           <FaceScreen
             stage={stage}
@@ -67,6 +66,7 @@ export default function RobotFace({
             blinkLevel={blinkLevel}
             motion={motion}
             faceStyle={faceStyle}
+            isThinking={stage === "processing"}
           />
         </div>
       </section>
@@ -101,17 +101,7 @@ export default function RobotFace({
           </div>
 
           <div className="pointer-events-none absolute bottom-6 left-1/2 z-20 flex w-[min(92vw,38rem)] -translate-x-1/2 gap-3">
-            <DebugPanel title="Debug" className="flex-1">
-              <p className="text-sm leading-6 text-[#214238]">
-                Friendly monochrome kiosk mode with local chunked speech playback.
-              </p>
-              {timings ? (
-                <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-[0.68rem] leading-5 text-[#33594d]">
-                  {JSON.stringify(timings, null, 2)}
-                </pre>
-              ) : null}
-            </DebugPanel>
-            <div className="debug-panel flex flex-1 flex-col justify-center gap-3 text-[0.65rem] uppercase tracking-[0.32em] text-[#4b7868]/80">
+            <div className="debug-panel flex w-full flex-col justify-center gap-3 text-[0.65rem] uppercase tracking-[0.32em] text-[#4b7868]/80">
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <span className="rounded-full border border-[#4c7768]/18 bg-[#effbf5]/58 px-3 py-2">
                   Offline

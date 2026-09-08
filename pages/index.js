@@ -26,7 +26,6 @@ export default function IrippleHome() {
     mouthMotion,
     reply,
     stage,
-    timings,
     transcript,
   } = useIrippleVoiceAssistant({
     knowledgeMode,
@@ -48,7 +47,6 @@ export default function IrippleHome() {
         mood={mood}
         transcript={transcript}
         reply={reply}
-        timings={timings}
         stage={stage}
         error={error}
         mouthMotion={mouthMotion}

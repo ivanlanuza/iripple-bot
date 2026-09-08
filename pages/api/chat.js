@@ -19,6 +19,7 @@ import {
   resolveChatModel,
   resolveEmbedModel,
 } from "@/lib/server/llama";
+import { CHAT_RAG_MAX_TOKENS } from "@/lib/server/chat-config";
 import {
   isEmbeddingStoreCompatible,
   loadEmbeddingStore,
@@ -225,7 +226,7 @@ export default async function handler(req, res) {
       keepAlive: MODEL_KEEP_ALIVE,
       options: {
         temperature: 0.1,
-        num_predict: 140,
+        num_predict: CHAT_RAG_MAX_TOKENS,
         num_ctx: 1024,
       },
     });

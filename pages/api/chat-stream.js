@@ -31,6 +31,10 @@ import {
 } from "@/lib/server/rag";
 import { createTimingTracker } from "@/lib/server/timing";
 import {
+  CHAT_RAG_MAX_TOKENS,
+  CHAT_RAW_MAX_TOKENS,
+} from "@/lib/server/chat-config";
+import {
   KNOWLEDGE_MODE_RAW,
   normalizeKnowledgeMode,
 } from "@/lib/knowledge-mode";
@@ -52,14 +56,14 @@ const CHAT_OPTIONS_BY_MODE = {
     temperature: 0.1,
     top_p: 0.9,
     repeat_penalty: 1.05,
-    num_predict: 140,
+    num_predict: CHAT_RAG_MAX_TOKENS,
     cache_prompt: true,
   },
   raw: {
     temperature: 0.05,
     top_p: 0.82,
     repeat_penalty: 1.08,
-    num_predict: 160,
+    num_predict: CHAT_RAW_MAX_TOKENS,
     cache_prompt: true,
   },
 };
@@ -117,6 +121,28 @@ function buildTimingPayload(tracker, extra = {}) {
 
 function writeJsonLine(res, payload) {
   res.write(`${JSON.stringify(payload)}\n`);
+  // `flush` is added by some Node/proxy integrations. Native Node responses
+  // stream on write, so this remains a no-op in the normal local runtime.
+  res.flush?.();
+}
+
+function beginStream(res, tracker, knowledgeMode) {
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "Content-Encoding": "identity",
+    "Transfer-Encoding": "chunked",
+    "X-Accel-Buffering": "no",
+  });
+  // Send the headers before retrieval/model work so fetch() receives a live
+  // body immediately. This prevents a buffering proxy from making streaming
+  // indistinguishable from a conventional JSON response.
+  res.flushHeaders?.();
+  writeJsonLine(res, {
+    type: "started",
+    knowledgeMode,
+    timings: buildTimingPayload(tracker, { knowledgeMode }),
+  });
 }
 
 function buildContextPayload(contextMatches) {
@@ -156,6 +182,7 @@ async function streamReply({
   let detectedMood = null;
   let metaSent = false;
   let firstTokenSeen = false;
+  let lastDeltaLength = 0;
   const spokenSentences = [];
   const ragUsed = knowledgeMode !== KNOWLEDGE_MODE_RAW;
   const chatOptions = getChatOptions(knowledgeMode);
@@ -195,6 +222,29 @@ async function streamReply({
             embedModel,
             cachePrompt: chatOptions.cache_prompt,
           }),
+        });
+      }
+
+      const partialReplyText = replyParts.text.replace(/\s+/g, " ").trim();
+      const hasNewWordBoundary = /\s$/.test(replyParts.text);
+      const hasEnoughNewText =
+        partialReplyText.length - lastDeltaLength >= 24;
+
+      // Keep the display responsive while speech continues to wait for a
+      // complete sentence. Batching avoids a React update and HTTP write for
+      // every model token.
+      if (
+        detectedMood &&
+        partialReplyText &&
+        (hasNewWordBoundary || hasEnoughNewText)
+      ) {
+        lastDeltaLength = partialReplyText.length;
+        writeJsonLine(res, {
+          type: "delta",
+          mood: detectedMood,
+          reply: `[${detectedMood}] ${partialReplyText}`,
+          replyText: partialReplyText,
+          cached: false,
         });
       }
 
@@ -313,11 +363,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  res.writeHead(200, {
-    "Content-Type": "application/x-ndjson; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Transfer-Encoding": "chunked",
-  });
+  beginStream(res, tracker, knowledgeMode);
 
   try {
     let sourceVersion = "none";
@@ -656,11 +702,13 @@ export default async function handler(req, res) {
       error: error.message || "llama.cpp unavailable",
       knowledgeMode,
     });
-    res.status(500).json({
+    writeJsonLine(res, {
+      type: "error",
       error: error.message || "llama.cpp unavailable",
       timings: buildTimingPayload(tracker, {
         knowledgeMode,
       }),
     });
+    res.end();
   }
 }
